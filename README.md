@@ -1,5 +1,4 @@
-````md id="w7m2qx"
-# lumin
+## lumin
 
 A terminal-first brightness and display control utility for Hyprland/Wayland setups.
 
@@ -165,12 +164,3 @@ The planned approach is fullscreen Wayland overlay dimming for displays that lac
 ## Inspiration
 
 * [wiremix](https://github.com/tsowell/wiremix)
-
----
-
-## License
-
-MIT
-
-```
-```
