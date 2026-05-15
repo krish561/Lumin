@@ -4,6 +4,7 @@ use serde::Deserialize;
 pub struct HyprMonitor {
     pub name: String,
     pub description: String,
+    pub bus: Option<String>,
 }
 
 use anyhow::Result;
@@ -17,4 +18,3 @@ pub fn get_monitors() -> Result<Vec<HyprMonitor>> {
 
     Ok(monitors)
 }
-
