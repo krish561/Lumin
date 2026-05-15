@@ -1,5 +1,6 @@
 use crate::brightness;
 use crate::monitor;
+use crate::software;
 
 use std::time::{Duration, Instant};
 
@@ -215,7 +216,7 @@ impl App {
                 }
             }
             BrightnessBackend::Software => {
-                // later: software dimming
+                let _ = software::set_software_brightness(device.brightness);
                 None
             }
         }

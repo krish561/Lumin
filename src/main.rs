@@ -1,6 +1,7 @@
 mod app;
 mod brightness;
 mod monitor;
+mod software;
 mod ui;
 
 use std::env;
