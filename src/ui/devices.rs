@@ -36,7 +36,7 @@ pub(crate) fn render(area: Rect, frame: &mut Frame, app: &App, theme: &Theme, ch
         .iter()
         .enumerate()
         .skip(list.top)
-        .take(list.visible_rows + 1)
+        .take(list.visible_rows)
         .zip(list.item_areas.iter())
     {
         render_device(

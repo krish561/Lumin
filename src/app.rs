@@ -43,6 +43,7 @@ pub struct Device {
     pub description: String,
     pub brightness: u16,
     pub backend: BrightnessBackend,
+    pub bus: Option<String>,
 }
 
 pub struct Notification {
@@ -73,29 +74,32 @@ pub struct App {
 }
 
 impl App {
-    fn detect_backend(name: &str) -> BrightnessBackend {
-        if name.starts_with("eDP") {
-            BrightnessBackend::Laptop
-        } else if name.starts_with("HDMI") || name.starts_with("DP") {
-            BrightnessBackend::Ddc
-        } else {
-            BrightnessBackend::Software
+    fn detect_backend(monitor: &monitor::HyprMonitor) -> BrightnessBackend {
+        if monitor.name.starts_with("eDP") {
+            return BrightnessBackend::Laptop;
         }
+
+        if (monitor.name.starts_with("HDMI") || monitor.name.starts_with("DP"))
+            && let Some(bus) = &monitor.bus
+            && brightness::supports_ddc(bus)
+        {
+            return BrightnessBackend::Ddc;
+        }
+
+        BrightnessBackend::Software
     }
 
     pub fn new(window_mode: WindowMode) -> Self {
         let monitors = monitor::get_monitors().unwrap_or_default();
 
-        let devices = monitors
+        let devices: Vec<Device> = monitors
             .into_iter()
             .map(|monitor| {
-                let backend = Self::detect_backend(&monitor.name);
+                let backend = Self::detect_backend(&monitor);
 
                 let brightness = match backend {
                     BrightnessBackend::Laptop => brightness::get_laptop_brightness().unwrap_or(50),
-
                     BrightnessBackend::Ddc => 50,
-
                     BrightnessBackend::Software => 50,
                 };
 
@@ -104,14 +108,29 @@ impl App {
                     description: monitor.description,
                     brightness,
                     backend: backend.clone(),
+                    bus: monitor.bus,
                 }
             })
             .collect();
+
+        // Spawn overlays for software-backend displays
+        for device in &devices {
+            if matches!(device.backend, BrightnessBackend::Software) {
+                let _ = software::spawn_overlay(&device.name, device.brightness as u8);
+            }
+        }
 
         Self {
             devices,
             selected: 0,
             ui: UiState::new(window_mode),
+        }
+    }
+    pub fn cleanup(&self) {
+        for device in &self.devices {
+            if matches!(device.backend, BrightnessBackend::Software) {
+                let _ = software::kill_overlay(&device.name);
+            }
         }
     }
 
@@ -201,7 +220,11 @@ impl App {
             }
 
             BrightnessBackend::Ddc => {
-                let success = brightness::set_ddc_brightness(device.brightness).unwrap_or(false);
+                let success = device
+                    .bus
+                    .as_deref()
+                    .and_then(|bus| brightness::set_ddc_brightness(device.brightness, bus).ok())
+                    .unwrap_or(false);
 
                 if !success {
                     let message = format!(
@@ -216,7 +239,8 @@ impl App {
                 }
             }
             BrightnessBackend::Software => {
-                let _ = software::set_software_brightness(device.brightness);
+                //let _ = software::set_software_brightness(device.brightness);
+                let _ = software::update_software_brightness(&device.name, device.brightness as u8);
                 None
             }
         }

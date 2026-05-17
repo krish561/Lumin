@@ -53,7 +53,10 @@ fn main() -> Result<()> {
 
         match event::read()? {
             Event::Key(key) => match key.code {
-                KeyCode::Char('q') => break,
+                KeyCode::Char('q') => {
+                    app.cleanup();
+                    break;
+                }
                 KeyCode::Esc => app.close_section(),
                 KeyCode::Char('1') => app.toggle_section(ActiveSection::Displays),
                 KeyCode::Char('2') => app.toggle_section(ActiveSection::Profiles),
@@ -158,7 +161,7 @@ fn terminal_command(exe: &Path) -> Option<String> {
 
     if Path::new("/usr/bin/ghostty").exists() || Path::new("/usr/local/bin/ghostty").exists() {
         return Some(format!(
-            "ghostty --title lumin -e env LUMIN_FLOATING_TUI=1 {exe}"
+            "ghostty --title=lumin -e env LUMIN_FLOATING_TUI=1 {exe}"
         ));
     }
 

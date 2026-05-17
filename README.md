@@ -1,166 +1,75 @@
 ## lumin
 
-A terminal-first brightness and display control utility for Hyprland/Wayland setups.
+A small brightness controller TUI for Hyprland.
 
-`lumin` is a Rust-based TUI focused on unified brightness control with:
-- laptop backlight support via `brightnessctl`
-- experimental DDC/CI integration
-- planned software dimming fallback
-- floating Hyprland integration
-- mouse-driven sliders
-- Wiremix-inspired interface design
+It gives one place to control laptop brightness, try DDC/CI for external displays, and fall back to a software dimming overlay when hardware brightness is not available.
 
-> ⚠️ work in progress 🙇‍♂️
-
----
-
-## Preview
+The UI is inspired by [wiremix](https://github.com/tsowell/wiremix): dense rows, text sliders, mouse support, and a small footer menu.
 
 ![Preview](preview.png)
 
-Current UI features:
-- dense Wiremix-style layout
-- floating overlay mode
-- transient notifications
-- keyboard + mouse interaction
-- compact text-mode sliders
-- terminal-theme-aware rendering
+## What works
 
----
+- laptop brightness with `brightnessctl`
+- experimental external monitor control with `ddcutil`
+- software overlay dimming fallback
+- keyboard and mouse brightness controls
+- Hyprland floating window launch
+- fallback notifications
 
-## Why?
+## Controls
 
-Brightness handling on Linux is messy.
+- `q`: quit
+- `Esc`: close popup
+- `Up` / `Down`: select display
+- `Left` / `Right`: adjust brightness
+- `1` / `2` / `3` / `4`: open footer sections
+- mouse click/drag on a slider: set brightness
 
-Some displays work with:
+## Requirements
+
+- Hyprland
+- `hyprctl`
 - `brightnessctl`
 - `ddcutil`
-- physical monitor controls
+- Ghostty or Alacritty for the floating TUI window
 
-Others:
-- expose no usable brightness interface
-- fail DDC communication
-- break through adapters/KVMs
-- use older DVI/VGA paths
-
-`lumin` aims to provide:
-```text
-one consistent brightness-control experience
-inside a modern terminal UI
-````
-
-with graceful fallback behavior where possible.
-
----
-
-## Current Features
-
-### Brightness
-
-* Laptop brightness control (`brightnessctl`)
-* Experimental DDC backend structure
-* Automatic DDC → Software fallback behavior
-* Mouse-draggable brightness sliders
-* Keyboard controls
-
-### UI
-
-* Wiremix-inspired TUI
-* Floating Hyprland window mode
-* Scrollable display list
-* Compact Unicode sliders
-* Overlay section system
-* Notification popups
-
-### Sections
-
-Current placeholder sections:
-
-* Displays
-* Profiles
-* Gamma
-* Night
-
-These are scaffolding for future display-management workflows.
-
----
-
-## Current Status
-
-### Working
-
-* Laptop brightness control
-* Hyprland floating integration
-* Mouse interaction
-* Notification system
-* Backend abstraction architecture
-* Wiremix-style UI
-
-### In Progress
-
-* Real DDC/CI support
-* Software dimming backend
-* Capability probing
-* Overlay rendering
-
----
-
-## Dependencies
-
-Runtime tools:
-
-* `brightnessctl`
-* `ddcutil`
-* `hyprctl`
-
-Compositor:
-
-* Hyprland
-
----
-
-## Build
+## Run
 
 ```bash
 cargo run
 ```
 
----
+On Hyprland, this opens lumin in a pinned floating terminal window.
+
+The overlay helper is built as a second binary:
+
+```bash
+cargo check --bin lumin-overlay
+```
 
 ## Notes
 
-### DDC/CI
+DDC support is still rough. Some monitors simply do not respond reliably, especially through adapters, docks, KVMs, or older inputs.
 
-DDC support varies heavily depending on:
+The software backend uses a fullscreen layer-shell overlay. It dims visually; it does not change the monitor panel brightness.
 
-* monitor firmware
-* GPU drivers
-* cables/adapters
-* docks/KVMs
-* display inputs
+The footer sections are placeholders for now:
 
-Current DDC support is experimental and still under active development.
+- Displays
+- Profiles
+- Gamma
+- Night
 
-### Software Backend
+## Layout
 
-The software dimming backend is currently being prototyped.
-The planned approach is fullscreen Wayland overlay dimming for displays that lack usable hardware brightness controls.
-
----
-
-## Planned Features
-
-* Real software dimming overlays
-* Proper DDC probing
-* Refresh rate controls
-* Resolution management
-* Gamma controls
-* Display information panels
-* Multi-monitor workflows
-* DPMS integration
-
----
-
-## Inspiration
-
-* [wiremix](https://github.com/tsowell/wiremix)
+```text
+src/
+├── app.rs
+├── brightness.rs
+├── software.rs
+├── monitor.rs
+├── main.rs
+├── bin/lumin-overlay.rs
+└── ui/
+```
