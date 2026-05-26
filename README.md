@@ -1,8 +1,8 @@
 ## lumin
 
-A small brightness controller TUI for Hyprland.
+A TUI brightness and display controller for Hyprland.
 
-It gives one place to control laptop brightness, try DDC/CI for external displays, and fall back to a software dimming overlay when hardware brightness is not available.
+Controls laptop brightness, external monitors via DDC/CI, and falls back to a software dimming overlay when hardware brightness is unavailable. Settings persist across sessions.
 
 The UI is inspired by [wiremix](https://github.com/tsowell/wiremix): dense rows, text sliders, mouse support, and a small footer menu.
 
@@ -10,12 +10,14 @@ The UI is inspired by [wiremix](https://github.com/tsowell/wiremix): dense rows,
 
 ## What works
 
-- laptop brightness with `brightnessctl`
-- experimental external monitor control with `ddcutil`
-- software overlay dimming fallback
+- laptop brightness via `brightnessctl`
+- external monitor brightness via `ddcutil` (DDC/CI)
+- software overlay dimming fallback when DDC is unavailable
+- automatic backend selection per monitor
+- brightness persistence across sessions (`~/.config/lumin/lumin.toml`)
 - keyboard and mouse brightness controls
 - Hyprland floating window launch
-- fallback notifications
+- fallback notifications when DDC fails
 
 ## Controls
 
@@ -48,25 +50,59 @@ The overlay helper is built as a second binary:
 cargo check --bin lumin-overlay
 ```
 
+## Config
+
+Lumin saves brightness settings automatically on quit:
+
+```
+~/.config/lumin/lumin.toml
+```
+
+```toml
+[[monitors]]
+name = "eDP-1"
+brightness = 75
+
+[[monitors]]
+name = "HDMI-A-1"
+brightness = 50
+preferred_backend = "Software"  # optional: force a backend
+```
+
+## Backend selection
+
+For each monitor, Lumin picks a backend automatically:
+
+| Monitor | Backend |
+|---|---|
+| `eDP*` | Laptop (`brightnessctl`) |
+| `HDMI*` / `DP*` with working DDC | DDC (`ddcutil`) |
+| Everything else | Software overlay |
+
+If DDC fails during use, the monitor falls back to the software overlay immediately.
+
+Set `preferred_backend` in the config to override automatic selection.
+
 ## Notes
 
-DDC support is still rough. Some monitors simply do not respond reliably, especially through adapters, docks, KVMs, or older inputs.
+DDC support is still rough. Some monitors do not respond reliably, especially through adapters, docks, KVMs, or older inputs.
 
 The software backend uses a fullscreen layer-shell overlay. It dims visually; it does not change the monitor panel brightness.
 
-The footer sections are placeholders for now:
+The footer sections are a work in progress:
 
-- Displays
-- Profiles
-- Gamma
-- Night
+- **Displays** — backend info and switching (in progress)
+- **Profiles** — named brightness presets (planned)
+- **Gamma** — color temperature controls (planned)
+- **Night** — night mode toggle and schedule (planned)
 
 ## Layout
 
-```text
+```
 src/
 ├── app.rs
 ├── brightness.rs
+├── config.rs
 ├── software.rs
 ├── monitor.rs
 ├── main.rs
