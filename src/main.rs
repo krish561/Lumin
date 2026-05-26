@@ -1,5 +1,6 @@
 mod app;
 mod brightness;
+mod config;
 mod monitor;
 mod software;
 mod ui;
@@ -30,6 +31,9 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    // Cleanup stale overlays before starting
+    cleanup_stale_overlays()?;
+
     enable_raw_mode()?;
 
     execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture)?;
@@ -40,6 +44,23 @@ fn main() -> Result<()> {
 
     let mut app = App::new(current_window_mode());
 
+    let result = run_app(&mut terminal, &mut app);
+
+    disable_raw_mode()?;
+
+    execute!(
+        terminal.backend_mut(),
+        DisableMouseCapture,
+        LeaveAlternateScreen
+    )?;
+
+    result
+}
+
+fn run_app(
+    terminal: &mut Terminal<ratatui::backend::CrosstermBackend<io::Stdout>>,
+    app: &mut App,
+) -> Result<()> {
     loop {
         terminal.draw(|frame| {
             ui::render(frame, &app);
@@ -108,14 +129,6 @@ fn main() -> Result<()> {
         }
     }
 
-    disable_raw_mode()?;
-
-    execute!(
-        terminal.backend_mut(),
-        DisableMouseCapture,
-        LeaveAlternateScreen
-    )?;
-
     Ok(())
 }
 
@@ -176,4 +189,26 @@ fn terminal_command(exe: &Path) -> Option<String> {
 
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+/// Clean up stale overlay sockets and processes at startup
+/// This handles cases where overlays didn't exit cleanly
+fn cleanup_stale_overlays() -> Result<()> {
+    let runtime_dir = env::var("XDG_RUNTIME_DIR")
+        .unwrap_or_else(|_| env::temp_dir().to_string_lossy().into_owned());
+
+    let runtime_path = Path::new(&runtime_dir);
+
+    // Find all lumin-overlay-*.socket files and remove them
+    if let Ok(entries) = std::fs::read_dir(runtime_path) {
+        for entry in entries.flatten() {
+            if let Ok(name) = entry.file_name().into_string() {
+                if name.starts_with("lumin-overlay-") && name.ends_with(".socket") {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
