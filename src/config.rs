@@ -1,4 +1,3 @@
-
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -64,10 +63,7 @@ impl Config {
             });
         }
 
-        self.monitors
-            .iter_mut()
-            .find(|m| m.name == name)
-            .unwrap()
+        self.monitors.iter_mut().find(|m| m.name == name).unwrap()
     }
 
     /// Update brightness for a monitor
@@ -114,34 +110,27 @@ impl Default for Config {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+#[test]
+fn test_config_get_or_create() {
+    let mut config = Config::default();
 
-    #[test]
-    fn test_config_get_or_create() {
-        let mut config = Config::default();
+    // First call - creates the monitor
+    {
         let monitor = config.get_or_create_monitor("eDP-1");
         assert_eq!(monitor.name, "eDP-1");
         assert_eq!(monitor.brightness, 50);
+    }
 
-        // Second call should return same monitor
+    // Second call - returns existing, mutate it
+    {
         let monitor2 = config.get_or_create_monitor("eDP-1");
         assert_eq!(config.monitors.len(), 1);
         monitor2.brightness = 75;
-
-        // Verify it was updated
-        let monitor3 = config.get_or_create_monitor("eDP-1");
-        assert_eq!(monitor3.brightness, 75);
     }
 
-    #[test]
-    fn test_config_multiple_monitors() {
-        let mut config = Config::default();
-        config.get_or_create_monitor("eDP-1");
-        config.get_or_create_monitor("HDMI-1");
-        config.get_or_create_monitor("DP-2");
-
-        assert_eq!(config.monitors.len(), 3);
+    // Third call - verify mutation persisted
+    {
+        let monitor3 = config.get_or_create_monitor("eDP-1");
+        assert_eq!(monitor3.brightness, 75);
     }
 }

@@ -74,6 +74,11 @@ pub struct Device {
     pub backend: BrightnessBackend,
     pub backend_reason: BackendReason,
     pub bus: Option<String>,
+    pub width: u32,
+    pub height: u32,
+    pub refresh_rate: f32,
+    pub available_modes: Vec<String>,
+    pub scale: f32,
 }
 
 pub struct Notification {
@@ -102,6 +107,9 @@ pub struct App {
     pub selected: usize,
     pub ui: UiState,
     pub config: Config,
+    pub temperature: u32, // current color temperature in K (default 6000)
+    pub gamma: u32,       // current gamma percent (default 100)
+    pub pending_mode_revert: Option<(String, Instant)>, // (previous_mode, revert_at)
 }
 
 impl App {
@@ -136,9 +144,7 @@ impl App {
         {
             return (
                 BrightnessBackend::Ddc,
-                BackendReason::DdcDetected {
-                    bus: bus.clone(),
-                },
+                BackendReason::DdcDetected { bus: bus.clone() },
             );
         }
 
@@ -180,6 +186,11 @@ impl App {
                     backend: backend.clone(),
                     backend_reason: reason,
                     bus: monitor.bus,
+                    width: monitor.width,
+                    height: monitor.height,
+                    refresh_rate: monitor.refresh_rate,
+                    available_modes: monitor.available_modes,
+                    scale: monitor.scale,
                 }
             })
             .collect();
@@ -191,7 +202,7 @@ impl App {
             }
         }
 
-// Ensure all detected devices are in config
+        // Ensure all detected devices are in config
         for device in &devices {
             config.get_or_create_monitor(&device.name);
             config.set_brightness(&device.name, device.brightness);
@@ -205,6 +216,9 @@ impl App {
             selected: 0,
             ui: UiState::new(window_mode),
             config,
+            temperature: 6000,
+            gamma: 100,
+            pending_mode_revert: None,
         };
 
         // Apply restored brightness to hardware
@@ -308,6 +322,126 @@ impl App {
         }
     }
 
+    pub fn set_refresh_rate(&mut self, mode_str: String) {
+        let Some(device) = self.devices.get(self.selected) else {
+            return;
+        };
+
+        // Save current mode before changing
+        let previous_mode = format!(
+            "{}x{}@{:.2}Hz",
+            device.width, device.height, device.refresh_rate
+        );
+        let name = device.name.clone();
+        let scale = device.scale;
+
+        match monitor::set_monitor_mode(&name, &mode_str, scale) {
+            Ok(_) => {
+                // Update device state
+                if let Some(rate) = parse_refresh_rate(&mode_str) {
+                    self.devices[self.selected].refresh_rate = rate;
+                }
+                if let Some((w, h)) = parse_resolution(&mode_str) {
+                    self.devices[self.selected].width = w;
+                    self.devices[self.selected].height = h;
+                }
+                // Set revert timer — 10 seconds to confirm
+                self.pending_mode_revert =
+                    Some((previous_mode, Instant::now() + Duration::from_secs(10)));
+                self.notify(
+                    "Mode changed. Press Enter to confirm or wait 10s to revert.".to_string(),
+                );
+            }
+            Err(_) => self.notify(format!("Failed to set mode {mode_str}")),
+        }
+    }
+
+    pub fn confirm_mode(&mut self) {
+        self.pending_mode_revert = None;
+        self.notify("Mode confirmed.".to_string());
+    }
+
+    pub fn check_mode_revert(&mut self) {
+        let Some((ref mode, revert_at)) = self.pending_mode_revert.clone() else {
+            return;
+        };
+        if Instant::now() >= revert_at {
+            let name = self
+                .devices
+                .get(self.selected)
+                .map(|d| d.name.clone())
+                .unwrap_or_default();
+            let scale = self
+                .devices
+                .get(self.selected)
+                .map(|d| d.scale)
+                .unwrap_or(1.0);
+            let _ = monitor::set_monitor_mode(&name, &mode, scale);
+            if let Some(rate) = parse_refresh_rate(&mode) {
+                self.devices[self.selected].refresh_rate = rate;
+            }
+            if let Some((w, h)) = parse_resolution(&mode) {
+                self.devices[self.selected].width = w;
+                self.devices[self.selected].height = h;
+            }
+            self.pending_mode_revert = None;
+            self.notify("Mode reverted.".to_string());
+        }
+    }
+
+    pub fn increase_temperature(&mut self) {
+        self.temperature = (self.temperature + 100).min(6500);
+        let t = self.temperature;
+        if let Err(_) = brightness::set_temperature(t) {
+            self.notify("Failed to set temperature".to_string());
+        }
+    }
+
+    pub fn decrease_temperature(&mut self) {
+        self.temperature = self.temperature.saturating_sub(100).max(2500);
+        let t = self.temperature;
+        if let Err(_) = brightness::set_temperature(t) {
+            self.notify("Failed to set temperature".to_string());
+        }
+    }
+
+    pub fn increase_gamma(&mut self) {
+        self.gamma = (self.gamma + 5).min(200);
+        let g = self.gamma;
+        if let Err(_) = brightness::set_gamma(g) {
+            self.notify("Failed to set gamma".to_string());
+        }
+    }
+
+    pub fn decrease_gamma(&mut self) {
+        self.gamma = self.gamma.saturating_sub(5).max(10);
+        let g = self.gamma;
+        if let Err(_) = brightness::set_gamma(g) {
+            self.notify("Failed to set gamma".to_string());
+        }
+    }
+
+    pub fn reset_gamma(&mut self) {
+        self.temperature = 6000;
+        self.gamma = 100;
+        let _ = brightness::reset_gamma();
+        self.notify("Gamma reset to identity".to_string());
+    }
+
+    pub fn toggle_night_light(&mut self) {
+        // Night light = warm temperature (4000K)
+        // Toggle between night (4000K) and neutral (6000K)
+        if self.temperature <= 4500 {
+            self.temperature = 6000;
+            let _ = brightness::reset_gamma();
+            self.notify("Night light off".to_string());
+        } else {
+            self.temperature = 4000;
+            let _ = brightness::set_temperature(4000);
+            self.notify("Night light on (4000K)".to_string());
+        }
+    }
+
     fn notify(&mut self, message: String) {
         self.ui.notification = Some(Notification {
             message,
@@ -354,9 +488,7 @@ impl App {
                     );
 
                     device.backend = BrightnessBackend::Software;
-                    device.backend_reason = BackendReason::DdcFailed {
-                        original_bus,
-                    };
+                    device.backend_reason = BackendReason::DdcFailed { original_bus };
 
                     // Spawn overlay on fallback
                     let _ = software::spawn_overlay(&device.name, device.brightness as u8);
@@ -372,4 +504,100 @@ impl App {
             }
         }
     }
+
+    pub fn retry_ddc(&mut self) {
+        let Some(device) = self.devices.get_mut(self.selected) else {
+            return;
+        };
+
+        if matches!(device.backend, BrightnessBackend::Laptop) {
+            return;
+        }
+
+        // Collect what we need before dropping the borrow
+        let bus = device.bus.clone();
+        let name = device.name.clone();
+
+        if let Some(ref bus) = bus {
+            if brightness::supports_ddc(bus) {
+                // Re-borrow to mutate
+                let device = self.devices.get_mut(self.selected).unwrap();
+                device.backend = BrightnessBackend::Ddc;
+                device.backend_reason = BackendReason::DdcDetected { bus: bus.clone() };
+                let _ = device; // explicit drop before notify
+
+                let _ = software::kill_overlay(&name);
+                let cfg = self.config.get_or_create_monitor(&name);
+                cfg.preferred_backend = None;
+                self.notify(format!("DDC working on {name}! Switched to DDC backend."));
+            } else {
+                let _ = device; // drop before notify
+                self.notify(format!("DDC still not responding on {name}."));
+            }
+        } else {
+            let _ = device;
+            self.notify(format!("No DDC bus known for {name}."));
+        }
+    }
+    /// Force the selected device to Software backend and save preference.
+    pub fn force_software(&mut self) {
+        let Some(device) = self.devices.get_mut(self.selected) else {
+            return;
+        };
+
+        // Already software
+        if matches!(device.backend, BrightnessBackend::Software) {
+            return;
+        }
+
+        let name = device.name.clone();
+        let brightness = device.brightness;
+
+        device.backend = BrightnessBackend::Software;
+        device.backend_reason = BackendReason::UserPreferred {
+            reason: "Software".to_string(),
+        };
+
+        // Spawn overlay
+        let _ = software::spawn_overlay(&name, brightness as u8);
+
+        // Save preference to config
+        let cfg = self.config.get_or_create_monitor(&name);
+        cfg.preferred_backend = Some("Software".to_string());
+
+        self.notify(format!("Forced Software backend for {}.", name));
+    }
+    pub fn cycle_refresh_rate(&mut self, reverse: bool) {
+        let Some(device) = self.devices.get(self.selected) else {
+            return;
+        };
+        let modes = device.available_modes.clone();
+        let current = format!(
+            "{}x{}@{:.2}Hz",
+            device.width, device.height, device.refresh_rate
+        );
+        let pos = modes.iter().position(|m| m == &current).unwrap_or(0);
+        let next = if reverse {
+            if pos == 0 { modes.len() - 1 } else { pos - 1 }
+        } else {
+            (pos + 1) % modes.len()
+        };
+        if let Some(mode) = modes.get(next).cloned() {
+            self.set_refresh_rate(mode);
+        }
+    }
+}
+fn parse_refresh_rate(mode_str: &str) -> Option<f32> {
+    // "1920x1080@60.00Hz" -> 60.0
+    let hz = mode_str.split('@').nth(1)?.trim_end_matches("Hz");
+    hz.parse().ok()
+}
+
+fn parse_resolution(mode_str: &str) -> Option<(u32, u32)> {
+    // "1920x1080@60.00Hz" -> (1920, 1080)
+    let res = mode_str.split('@').next()?;
+    let mut parts = res.split('x');
+    let w = parts.next()?.parse().ok()?;
+    let h = parts.next()?.parse().ok()?;
+    Some((w, h))
 }

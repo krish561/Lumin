@@ -67,7 +67,7 @@ fn run_app(
         })?;
 
         app.dismiss_expired_notifications();
-
+        app.check_mode_revert();
         if !event::poll(Duration::from_millis(100))? {
             continue;
         }
@@ -78,6 +78,42 @@ fn run_app(
                     app.cleanup();
                     break;
                 }
+                KeyCode::Enter => {
+                    if app.ui.active_section == Some(ActiveSection::Displays) {
+                        app.confirm_mode();
+                    }
+                }
+                // Gamma section controls
+                KeyCode::Char('g') => {
+                    if app.ui.active_section == Some(ActiveSection::Gamma) {
+                        app.decrease_gamma();
+                    }
+                }
+                KeyCode::Char('G') => {
+                    if app.ui.active_section == Some(ActiveSection::Gamma) {
+                        app.increase_gamma();
+                    }
+                }
+                KeyCode::Char('r') => {
+                    if app.ui.active_section == Some(ActiveSection::Displays) {
+                        app.retry_ddc();
+                    } else if app.ui.active_section == Some(ActiveSection::Gamma) {
+                        app.reset_gamma();
+                    }
+                }
+                // Night section toggle
+                KeyCode::Char('n') => {
+                    if app.ui.active_section == Some(ActiveSection::Night) {
+                        app.toggle_night_light();
+                    }
+                }
+                // Temperature: reuse Left/Right when Night or Gamma is open
+                // (already handled by increase/decrease but needs section guard)
+                KeyCode::Char('s') => {
+                    if app.ui.active_section == Some(ActiveSection::Displays) {
+                        app.force_software();
+                    }
+                }
                 KeyCode::Esc => app.close_section(),
                 KeyCode::Char('1') => app.toggle_section(ActiveSection::Displays),
                 KeyCode::Char('2') => app.toggle_section(ActiveSection::Profiles),
@@ -85,8 +121,34 @@ fn run_app(
                 KeyCode::Char('4') => app.toggle_section(ActiveSection::Night),
                 KeyCode::Up => app.previous(),
                 KeyCode::Down => app.next(),
-                KeyCode::Right => app.increase(),
-                KeyCode::Left => app.decrease(),
+                KeyCode::Right => {
+                    if app.ui.active_section == Some(ActiveSection::Night)
+                        || app.ui.active_section == Some(ActiveSection::Gamma)
+                    {
+                        app.increase_temperature();
+                    } else {
+                        app.increase();
+                    }
+                }
+                KeyCode::Left => {
+                    if app.ui.active_section == Some(ActiveSection::Night)
+                        || app.ui.active_section == Some(ActiveSection::Gamma)
+                    {
+                        app.decrease_temperature();
+                    } else {
+                        app.decrease();
+                    }
+                }
+                KeyCode::Tab => {
+                    if app.ui.active_section == Some(ActiveSection::Displays) {
+                        app.cycle_refresh_rate(false);
+                    }
+                }
+                KeyCode::BackTab => {
+                    if app.ui.active_section == Some(ActiveSection::Displays) {
+                        app.cycle_refresh_rate(true);
+                    }
+                }
                 _ => {}
             },
             Event::Mouse(mouse) => {
