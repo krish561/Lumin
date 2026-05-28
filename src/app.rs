@@ -216,7 +216,7 @@ impl App {
             selected: 0,
             ui: UiState::new(window_mode),
             config,
-            temperature: 6000,
+            temperature: brightness::get_temperature().unwrap_or(6000),
             gamma: 100,
             pending_mode_revert: None,
         };
