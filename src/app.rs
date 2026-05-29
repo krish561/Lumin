@@ -2,6 +2,7 @@ use crate::brightness;
 use crate::config::Config;
 use crate::monitor;
 use crate::software;
+use std::collections::VecDeque;
 
 use std::time::{Duration, Instant};
 
@@ -86,9 +87,10 @@ pub struct Notification {
     expires_at: Instant,
 }
 
+// 2. Replace the notification field in UiState
 pub struct UiState {
     pub active_section: Option<ActiveSection>,
-    pub notification: Option<Notification>,
+    pub notifications: VecDeque<Notification>, // was: notification: Option<Notification>
     pub window_mode: WindowMode,
 }
 
@@ -96,7 +98,7 @@ impl UiState {
     fn new(window_mode: WindowMode) -> Self {
         Self {
             active_section: None,
-            notification: None,
+            notifications: VecDeque::new(), // was: notification: None
             window_mode,
         }
     }
@@ -105,11 +107,12 @@ impl UiState {
 pub struct App {
     pub devices: Vec<Device>,
     pub selected: usize,
+    pub profiles_cursor: usize,
     pub ui: UiState,
     pub config: Config,
-    pub temperature: u32, // current color temperature in K (default 6000)
-    pub gamma: u32,       // current gamma percent (default 100)
-    pub pending_mode_revert: Option<(String, Instant)>, // (previous_mode, revert_at)
+    pub temperature: u32,
+    pub gamma: u32,
+    pub pending_mode_revert: Option<(String, Instant)>,
 }
 
 impl App {
@@ -219,6 +222,7 @@ impl App {
             temperature: brightness::get_temperature().unwrap_or(6000),
             gamma: 100,
             pending_mode_revert: None,
+            profiles_cursor: 0,
         };
 
         // Apply restored brightness to hardware
@@ -311,14 +315,15 @@ impl App {
         }
     }
 
+    // 4. Replace dismiss_expired_notifications() — pop front when head has expired
     pub fn dismiss_expired_notifications(&mut self) {
         if self
             .ui
-            .notification
-            .as_ref()
-            .is_some_and(|notification| Instant::now() >= notification.expires_at)
+            .notifications
+            .front()
+            .is_some_and(|n| Instant::now() >= n.expires_at)
         {
-            self.ui.notification = None;
+            self.ui.notifications.pop_front();
         }
     }
 
@@ -442,11 +447,16 @@ impl App {
         }
     }
 
+    // 3. Replace notify() — push to back, cap at 5 to avoid unbounded growth
     fn notify(&mut self, message: String) {
-        self.ui.notification = Some(Notification {
+        self.ui.notifications.push_back(Notification {
             message,
             expires_at: Instant::now() + Duration::from_secs(4),
         });
+        // Cap queue so a burst never piles up indefinitely
+        if self.ui.notifications.len() > 5 {
+            self.ui.notifications.pop_front();
+        }
     }
 
     /// Apply brightness without returning a notification (for silent init)
@@ -585,6 +595,86 @@ impl App {
         if let Some(mode) = modes.get(next).cloned() {
             self.set_refresh_rate(mode);
         }
+    }
+
+    pub fn save_profile(&mut self, name: String) {
+        let entries = self
+            .devices
+            .iter()
+            .map(|d| crate::config::ProfileEntry {
+                monitor: d.name.clone(),
+                brightness: d.brightness,
+            })
+            .collect();
+        self.config.upsert_profile(name.clone(), entries);
+        let _ = self.config.save();
+        self.notify(format!("Saved profile \"{}\"", name));
+    }
+
+    pub fn apply_profile(&mut self, index: usize) {
+        let Some(profile) = self.config.profiles.get(index).cloned() else {
+            return;
+        };
+
+        for entry in &profile.entries {
+            // Update config
+            self.config.set_brightness(&entry.monitor, entry.brightness);
+
+            // Find device index to avoid borrow conflict
+            let Some(device_index) = self.devices.iter().position(|d| d.name == entry.monitor)
+            else {
+                continue;
+            };
+
+            // Update device brightness
+            self.devices[device_index].brightness = entry.brightness;
+
+            // Apply to hardware — extract what we need first
+            let device = &mut self.devices[device_index];
+            match &device.backend {
+                BrightnessBackend::Laptop => {
+                    let _ = crate::brightness::set_laptop_brightness(device.brightness);
+                }
+                BrightnessBackend::Ddc => {
+                    if let Some(bus) = device.bus.clone() {
+                        let _ = crate::brightness::set_ddc_brightness(device.brightness, &bus);
+                    }
+                }
+                BrightnessBackend::Software => {
+                    let _ = crate::software::update_software_brightness(
+                        &device.name.clone(),
+                        device.brightness as u8,
+                    );
+                }
+            }
+        }
+
+        self.notify(format!("Applied profile \"{}\"", profile.name));
+    }
+
+    pub fn delete_profile(&mut self, index: usize) {
+        let name = self.config.profiles.get(index).map(|p| p.name.clone());
+        if self.config.delete_profile(index) {
+            let _ = self.config.save();
+            if self.profiles_cursor >= self.config.profiles.len() {
+                self.profiles_cursor = self.config.profiles.len().saturating_sub(1);
+            }
+            if let Some(name) = name {
+                self.notify(format!("Deleted profile \"{}\"", name));
+            }
+        }
+    }
+
+    pub fn profiles_next(&mut self) {
+        let len = self.config.profiles.len();
+        if len == 0 {
+            return;
+        }
+        self.profiles_cursor = (self.profiles_cursor + 1).min(len - 1);
+    }
+
+    pub fn profiles_previous(&mut self) {
+        self.profiles_cursor = self.profiles_cursor.saturating_sub(1);
     }
 }
 fn parse_refresh_rate(mode_str: &str) -> Option<f32> {

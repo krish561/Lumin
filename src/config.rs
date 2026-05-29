@@ -18,8 +18,22 @@ pub struct MonitorConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProfileEntry {
+    pub monitor: String,
+    pub brightness: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Profile {
+    pub name: String,
+    pub entries: Vec<ProfileEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub monitors: Vec<MonitorConfig>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub profiles: Vec<Profile>,
 }
 
 impl Config {
@@ -31,9 +45,7 @@ impl Config {
             let content = std::fs::read_to_string(&path)?;
             Ok(toml::from_str(&content).unwrap_or_default())
         } else {
-            Ok(Config {
-                monitors: Vec::new(),
-            })
+            Ok(Config::default())
         }
     }
 
@@ -100,16 +112,34 @@ impl Config {
 
         Ok(PathBuf::from(config_home).join("lumin/lumin.toml"))
     }
+
+    pub fn upsert_profile(&mut self, name: String, entries: Vec<ProfileEntry>) {
+        if let Some(existing) = self.profiles.iter_mut().find(|p| p.name == name) {
+            existing.entries = entries;
+        } else {
+            self.profiles.push(Profile { name, entries });
+        }
+    }
+
+    /// Delete a profile by index, returns true if removed
+    pub fn delete_profile(&mut self, index: usize) -> bool {
+        if index < self.profiles.len() {
+            self.profiles.remove(index);
+            true
+        } else {
+            false
+        }
+    }
 }
 
 impl Default for Config {
     fn default() -> Self {
         Config {
             monitors: Vec::new(),
+            profiles: Vec::new(),
         }
     }
 }
-
 #[test]
 fn test_config_get_or_create() {
     let mut config = Config::default();

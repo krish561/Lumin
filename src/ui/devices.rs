@@ -132,7 +132,19 @@ fn render_device_body(
         .split(area);
 
     render_device_header(layout[0], frame, device, theme);
+    render_device_reason(layout[1], frame, device, theme);
     bars::render_brightness(layout[2], frame, device, theme, char_set);
+}
+
+fn render_device_reason(area: Rect, frame: &mut Frame, device: &Device, theme: &Theme) {
+    let reason = device.backend_reason.describe();
+    let line = Line::from(vec![Span::styled(reason, theme.detail)]).left_aligned();
+    // Match the 1-cell left margin used by the brightness bar
+    let inner = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(2), Constraint::Min(0)])
+        .split(area)[1];
+    frame.render_widget(line, inner);
 }
 
 fn render_device_header(area: Rect, frame: &mut Frame, device: &Device, theme: &Theme) {

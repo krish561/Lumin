@@ -11,10 +11,12 @@ pub fn update_software_brightness(monitor_name: &str, percentage: u8) -> std::io
     let socket_path =
         PathBuf::from(runtime_dir).join(format!("lumin-overlay-{}.socket", monitor_name));
 
+    // Clamp to 99 max — the overlay uses opacity so 99% brightness = 1% dim
+    // which is imperceptible. True 100% is handled by not spawning an overlay.
+    let clamped = percentage.min(99);
+
     let mut stream = UnixStream::connect(socket_path)?;
-
-    stream.write_all(&[percentage])?;
-
+    stream.write_all(&[clamped])?;
     Ok(())
 }
 pub fn spawn_overlay(monitor_name: &str, brightness: u8) -> Result<()> {
@@ -23,14 +25,16 @@ pub fn spawn_overlay(monitor_name: &str, brightness: u8) -> Result<()> {
         .unwrap()
         .join("lumin-overlay");
 
+    let clamped = brightness.min(99); // add this
+
     Command::new(exe)
         .arg("--monitor")
         .arg(monitor_name)
         .arg("--brightness")
-        .arg(brightness.to_string())
+        .arg(clamped.to_string()) // was brightness.to_string()
         .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null()) // add this
-        .stderr(std::process::Stdio::null()) // add this
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .spawn()?;
     Ok(())
 }

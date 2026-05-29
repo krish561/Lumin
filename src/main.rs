@@ -81,6 +81,8 @@ fn run_app(
                 KeyCode::Enter => {
                     if app.ui.active_section == Some(ActiveSection::Displays) {
                         app.confirm_mode();
+                    } else if app.ui.active_section == Some(ActiveSection::Profiles) {
+                        app.apply_profile(app.profiles_cursor);
                     }
                 }
                 // Gamma section controls
@@ -114,13 +116,51 @@ fn run_app(
                         app.force_software();
                     }
                 }
+                KeyCode::Char('w') => {
+                    if app.ui.active_section == Some(ActiveSection::Profiles) {
+                        let name = if app.config.profiles.is_empty() {
+                            "custom".to_string()
+                        } else {
+                            let presets = ["indoor", "outdoor", "gaming", "night", "custom"];
+                            let existing: Vec<&str> = app
+                                .config
+                                .profiles
+                                .iter()
+                                .map(|p| p.name.as_str())
+                                .collect();
+                            presets
+                                .iter()
+                                .find(|&&n| !existing.contains(&n))
+                                .map(|&n| n.to_string())
+                                .unwrap_or_else(|| format!("custom-{}", app.config.profiles.len()))
+                        };
+                        app.save_profile(name);
+                    }
+                }
+                KeyCode::Char('d') => {
+                    if app.ui.active_section == Some(ActiveSection::Profiles) {
+                        app.delete_profile(app.profiles_cursor);
+                    }
+                }
                 KeyCode::Esc => app.close_section(),
                 KeyCode::Char('1') => app.toggle_section(ActiveSection::Displays),
                 KeyCode::Char('2') => app.toggle_section(ActiveSection::Profiles),
                 KeyCode::Char('3') => app.toggle_section(ActiveSection::Gamma),
                 KeyCode::Char('4') => app.toggle_section(ActiveSection::Night),
-                KeyCode::Up => app.previous(),
-                KeyCode::Down => app.next(),
+                KeyCode::Up => {
+                    if app.ui.active_section == Some(ActiveSection::Profiles) {
+                        app.profiles_previous();
+                    } else {
+                        app.previous();
+                    }
+                }
+                KeyCode::Down => {
+                    if app.ui.active_section == Some(ActiveSection::Profiles) {
+                        app.profiles_next();
+                    } else {
+                        app.next();
+                    }
+                }
                 KeyCode::Right => {
                     if app.ui.active_section == Some(ActiveSection::Night)
                         || app.ui.active_section == Some(ActiveSection::Gamma)

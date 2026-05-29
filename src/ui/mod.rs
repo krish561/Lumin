@@ -39,10 +39,20 @@ pub fn render(frame: &mut Frame, app: &App) {
         overlays::render_section_window(frame.area(), frame, app, section, &theme);
     }
 
-    if let Some(notification) = &app.ui.notification {
-        notifications::render(frame.area(), frame, &notification.message, &theme);
+    // Collect up to 3 messages from the front of the queue, newest first
+    let stack: Vec<&str> = app
+        .ui
+        .notifications
+        .iter()
+        .rev()
+        .take(3)
+        .map(|n| n.message.as_str())
+        .collect();
+
+    if !stack.is_empty() {
+        notifications::render_stack(frame.area(), frame, &stack, &theme);
     }
-}
+} // <-- this closes render()
 
 fn render_header(area: Rect, frame: &mut Frame, app: &App, theme: &Theme) {
     let mode = match app.ui.window_mode {

@@ -96,6 +96,7 @@ fn main() {
         window.set_anchor(Edge::Right, true);
         window.set_exclusive_zone(-1);
 
+        // initial setup — replace the if/else with just:
         window.set_opacity(brightness_to_opacity(initial_brightness));
 
         let display = gtk::gdk::Display::default().expect("no display");
@@ -194,6 +195,8 @@ fn main() {
                     &monitor_for_ipc,
                     format!("ipc brightness={brightness_percent} opacity={opacity}"),
                 );
+                // IPC handler — replace the if/else with just:
+                window_clone.set_visible(true);
                 window_clone.set_opacity(opacity);
             }
         });

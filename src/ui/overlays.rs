@@ -41,7 +41,7 @@ pub(crate) fn render_section_window(
         ActiveSection::Displays => render_displays(inner, frame, app, theme),
         ActiveSection::Gamma => render_gamma(inner, frame, app, theme),
         ActiveSection::Night => render_night(inner, frame, app, theme),
-        ActiveSection::Profiles => render_placeholder(inner, frame, section, theme),
+        ActiveSection::Profiles => render_profiles(inner, frame, app, theme),
     }
 }
 
@@ -394,38 +394,107 @@ fn backend_label(backend: &BrightnessBackend) -> &'static str {
 
 // ── Placeholder ───────────────────────────────────────────────────────────────
 
-fn render_placeholder(area: Rect, frame: &mut Frame, section: ActiveSection, theme: &Theme) {
-    let lines: Vec<Line> = match section {
-        ActiveSection::Profiles => vec![
-            Line::from(Span::styled("Brightness profiles", theme.title)),
-            Line::from(""),
-            Line::from(Span::styled(
-                "Coming soon: indoor, outdoor, gaming, night, custom",
-                theme.detail,
-            )),
-        ],
-        _ => vec![Line::from(Span::styled("Coming soon", theme.detail))],
-    };
+fn render_profiles(area: Rect, frame: &mut Frame, app: &App, theme: &Theme) {
+    let profiles = &app.config.profiles;
 
-    let constraints = lines
-        .iter()
-        .map(|_| Constraint::Length(1))
-        .collect::<Vec<_>>();
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints(constraints)
+        .constraints([
+            Constraint::Length(1), // 0 title
+            Constraint::Length(1), // 1 spacer
+            Constraint::Min(0),    // 2 list
+            Constraint::Length(1), // 3 spacer
+            Constraint::Length(1), // 4 hints
+        ])
         .split(area);
 
-    for (line, area) in lines.into_iter().zip(rows.iter()) {
-        frame.render_widget(line, *area);
-    }
-}
+    frame.render_widget(
+        Line::from(Span::styled("Brightness profiles", theme.title)),
+        rows[0],
+    );
 
+    if profiles.is_empty() {
+        frame.render_widget(
+            Line::from(Span::styled(
+                "No profiles yet.  w to save current state.",
+                theme.detail,
+            )),
+            rows[2],
+        );
+    } else {
+        let visible_height = rows[2].height as usize;
+        let cursor = app.profiles_cursor.min(profiles.len().saturating_sub(1));
+        let top = cursor.saturating_sub(visible_height.saturating_sub(1));
+
+        let constraints: Vec<Constraint> = profiles
+            .iter()
+            .skip(top)
+            .take(visible_height)
+            .map(|_| Constraint::Length(1))
+            .collect();
+
+        let list_rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(constraints)
+            .split(rows[2]);
+
+        for (i, (profile, row_area)) in profiles
+            .iter()
+            .skip(top)
+            .take(visible_height)
+            .zip(list_rows.iter())
+            .enumerate()
+        {
+            let index = top + i;
+            let selected = index == cursor;
+
+            // Build per-monitor brightness summary
+            let summary = profile
+                .entries
+                .iter()
+                .map(|e| format!("{}:{}%", e.monitor, e.brightness))
+                .collect::<Vec<_>>()
+                .join("  ");
+
+            let name_style = if selected {
+                theme.tab_selected
+            } else {
+                theme.title
+            };
+
+            let marker = if selected { "▶ " } else { "  " };
+
+            frame.render_widget(
+                Line::from(vec![
+                    Span::styled(marker, theme.tab_marker),
+                    Span::styled(profile.name.clone(), name_style),
+                    Span::styled(format!("  {}", summary), theme.detail),
+                ]),
+                *row_area,
+            );
+        }
+    }
+
+    // Hints row
+    frame.render_widget(
+        Line::from(vec![
+            Span::styled("↑/↓ ", theme.tab_marker),
+            Span::styled("select  ", theme.detail),
+            Span::styled("Enter ", theme.tab_marker),
+            Span::styled("apply  ", theme.detail),
+            Span::styled("w ", theme.tab_marker),
+            Span::styled("save  ", theme.detail),
+            Span::styled("d ", theme.tab_marker),
+            Span::styled("delete", theme.detail),
+        ]),
+        rows[4],
+    );
+}
 fn section_size(section: ActiveSection) -> (u16, u16) {
     match section {
         ActiveSection::Displays => (64, 13),
         ActiveSection::Gamma => (60, 8),
         ActiveSection::Night => (60, 8),
-        ActiveSection::Profiles => (54, 6),
+        ActiveSection::Profiles => (64, 12),
     }
 }
