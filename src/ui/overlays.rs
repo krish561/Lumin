@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Flex, Layout, Rect},
@@ -5,7 +7,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Padding},
 };
 
-use crate::app::{ActiveSection, App, BackendReason, BrightnessBackend};
+use crate::app::{ActiveSection, App, BackendReason, BrightnessBackend, ModeConfirmChoice};
 
 use super::theme::Theme;
 
@@ -38,16 +40,16 @@ pub(crate) fn render_section_window(
     frame.render_widget(block, window_area);
 
     match section {
-        ActiveSection::Displays => render_displays(inner, frame, app, theme),
+        ActiveSection::Info => render_info(inner, frame, app, theme),
+        ActiveSection::Display => render_display(inner, frame, app, theme),
+        ActiveSection::Profiles => render_profiles(inner, frame, app, theme),
         ActiveSection::Gamma => render_gamma(inner, frame, app, theme),
         ActiveSection::Night => render_night(inner, frame, app, theme),
-        ActiveSection::Profiles => render_profiles(inner, frame, app, theme),
     }
 }
 
 // ── Displays ──────────────────────────────────────────────────────────────────
-
-fn render_displays(area: Rect, frame: &mut Frame, app: &App, theme: &Theme) {
+fn render_display(area: Rect, frame: &mut Frame, app: &App, theme: &Theme) {
     let Some(device) = app.devices.get(app.selected) else {
         frame.render_widget(
             Line::from(Span::styled("No display selected", theme.detail)),
@@ -56,17 +58,110 @@ fn render_displays(area: Rect, frame: &mut Frame, app: &App, theme: &Theme) {
         return;
     };
 
-    // Rows:
-    //   0: description + name
-    //   1: spacer
-    //   2: backend
-    //   3: reason
-    //   4: brightness
-    //   5: spacer
-    //   6: current mode
-    //   7: available modes hint
-    //   8: spacer
-    //   9: actions
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // 0 title
+            Constraint::Length(1), // 1 spacer
+            Constraint::Min(0),    // 2 mode list
+            Constraint::Length(1), // 3 spacer
+            Constraint::Length(1), // 4 hint
+        ])
+        .split(area);
+
+    frame.render_widget(
+        Line::from(vec![
+            Span::styled(device.description.clone(), theme.title),
+            Span::styled(format!("  {}", device.name), theme.detail),
+        ]),
+        rows[0],
+    );
+
+    if device.available_modes.is_empty() {
+        frame.render_widget(
+            Line::from(Span::styled("No modes available", theme.detail)),
+            rows[2],
+        );
+    } else {
+        let visible_height = rows[2].height as usize;
+        let cursor = app
+            .display_cursor
+            .min(device.available_modes.len().saturating_sub(1));
+        let top = cursor.saturating_sub(visible_height.saturating_sub(1));
+
+        let current = format!(
+            "{}x{}@{:.2}Hz",
+            device.width, device.height, device.refresh_rate
+        );
+
+        let constraints: Vec<Constraint> = device
+            .available_modes
+            .iter()
+            .skip(top)
+            .take(visible_height)
+            .map(|_| Constraint::Length(1))
+            .collect();
+
+        let list_rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(constraints)
+            .split(rows[2]);
+
+        for (i, (mode, row_area)) in device
+            .available_modes
+            .iter()
+            .skip(top)
+            .take(visible_height)
+            .zip(list_rows.iter())
+            .enumerate()
+        {
+            let index = top + i;
+            let is_cursor = index == cursor;
+            let is_active = mode == &current;
+
+            let marker = if is_cursor { "▶ " } else { "  " };
+            let name_style = if is_cursor {
+                theme.tab_selected
+            } else if is_active {
+                theme.title
+            } else {
+                theme.detail
+            };
+            let active_tag = if is_active {
+                Span::styled("  active", theme.tab_marker)
+            } else {
+                Span::raw("")
+            };
+
+            frame.render_widget(
+                Line::from(vec![
+                    Span::styled(marker, theme.tab_marker),
+                    Span::styled(mode.clone(), name_style),
+                    active_tag,
+                ]),
+                *row_area,
+            );
+        }
+    }
+
+    let hint = if app.pending_mode_revert.is_some() {
+        "Enter to confirm   waiting to revert..."
+    } else {
+        "↑/↓ select   Enter apply"
+    };
+    frame.render_widget(Line::from(Span::styled(hint, theme.detail)), rows[4]);
+}
+
+// --- Info ---------------------------------------------------------------------
+fn render_info(area: Rect, frame: &mut Frame, app: &App, theme: &Theme) {
+    let Some(device) = app.devices.get(app.selected) else {
+        frame.render_widget(
+            Line::from(Span::styled("No display selected", theme.detail)),
+            area,
+        );
+        return;
+    };
+
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -76,14 +171,10 @@ fn render_displays(area: Rect, frame: &mut Frame, app: &App, theme: &Theme) {
             Constraint::Length(1), // 3 reason
             Constraint::Length(1), // 4 brightness
             Constraint::Length(1), // 5 spacer
-            Constraint::Length(1), // 6 current mode
-            Constraint::Length(1), // 7 modes hint
-            Constraint::Length(1), // 8 spacer
-            Constraint::Length(1), // 9 actions
+            Constraint::Length(1), // 6 actions
         ])
         .split(area);
 
-    // Row 0: title
     frame.render_widget(
         Line::from(vec![
             Span::styled(device.description.clone(), theme.title),
@@ -92,7 +183,6 @@ fn render_displays(area: Rect, frame: &mut Frame, app: &App, theme: &Theme) {
         rows[0],
     );
 
-    // Row 2-4: backend info + brightness
     render_kv(
         rows[2],
         frame,
@@ -108,25 +198,8 @@ fn render_displays(area: Rect, frame: &mut Frame, app: &App, theme: &Theme) {
         theme,
     );
     render_brightness_row(rows[4], frame, device.brightness, theme);
-
-    // Row 6: current mode
-    let current_mode = format!(
-        "{}x{}@{:.2}Hz  scale {:.1}",
-        device.width, device.height, device.refresh_rate, device.scale
-    );
-    render_kv(rows[6], frame, "Mode", &current_mode, theme);
-
-    // Row 7: available modes count + hint
-    let modes_hint = format!(
-        "{} modes available  Tab/Shift+Tab to cycle",
-        device.available_modes.len()
-    );
-    frame.render_widget(Line::from(Span::styled(modes_hint, theme.detail)), rows[7]);
-
-    // Row 9: backend actions
-    render_display_actions(rows[9], frame, app, theme);
+    render_display_actions(rows[6], frame, app, theme);
 }
-
 // ── Gamma ─────────────────────────────────────────────────────────────────────
 
 fn render_gamma(area: Rect, frame: &mut Frame, app: &App, theme: &Theme) {
@@ -492,9 +565,116 @@ fn render_profiles(area: Rect, frame: &mut Frame, app: &App, theme: &Theme) {
 }
 fn section_size(section: ActiveSection) -> (u16, u16) {
     match section {
-        ActiveSection::Displays => (64, 13),
+        ActiveSection::Info => (64, 9),
+        ActiveSection::Display => (52, 16),
+        ActiveSection::Profiles => (64, 12),
         ActiveSection::Gamma => (60, 8),
         ActiveSection::Night => (60, 8),
-        ActiveSection::Profiles => (64, 12),
+    }
+}
+pub fn render_mode_confirm_popup(area: Rect, frame: &mut Frame, app: &App, theme: &Theme) {
+    use crate::app::ModeConfirmChoice;
+
+    let Some(ref pending) = app.pending_mode_revert else {
+        return;
+    };
+
+    let secs_left = pending
+        .revert_at
+        .saturating_duration_since(Instant::now())
+        .as_secs()
+        .max(0);
+
+    let width = 44u16.min(area.width);
+    let height = 7u16.min(area.height);
+
+    let [popup_area] = Layout::horizontal([Constraint::Length(width)])
+        .flex(Flex::Center)
+        .areas(area);
+    let [popup_area] = Layout::vertical([Constraint::Length(height)])
+        .flex(Flex::Center)
+        .areas(popup_area);
+
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::default()
+        .title("Display mode changed")
+        .borders(Borders::ALL)
+        .border_style(theme.notification_border)
+        .padding(Padding::horizontal(2));
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // 0 message
+            Constraint::Length(1), // 1 timer
+            Constraint::Length(1), // 2 spacer
+            Constraint::Length(1), // 3 buttons
+        ])
+        .split(inner);
+
+    frame.render_widget(
+        Line::from(Span::styled("Keep this display mode?", theme.title)),
+        rows[0],
+    );
+
+    frame.render_widget(
+        Line::from(Span::styled(
+            format!("Reverting in {}s...", secs_left),
+            theme.detail,
+        )),
+        rows[1],
+    );
+
+    // Buttons — highlighted based on current choice
+    let (ok_style, revert_style) = match pending.choice {
+        ModeConfirmChoice::Ok => (theme.tab_selected, theme.detail),
+        ModeConfirmChoice::Revert => (theme.detail, theme.tab_selected),
+    };
+
+    let button_line = Line::from(vec![
+        Span::styled("[ OK ]", ok_style),
+        Span::raw("   "),
+        Span::styled("[ Revert ]", revert_style),
+    ]);
+    frame.render_widget(button_line, rows[3]);
+}
+
+pub(crate) fn mode_confirm_button_at(
+    area: Rect,
+    column: u16,
+    row: u16,
+) -> Option<ModeConfirmChoice> {
+    let width = 44u16.min(area.width);
+    let height = 7u16.min(area.height);
+
+    let [popup_area] = Layout::horizontal([Constraint::Length(width)])
+        .flex(Flex::Center)
+        .areas(area);
+    let [popup_area] = Layout::vertical([Constraint::Length(height)])
+        .flex(Flex::Center)
+        .areas(popup_area);
+
+    // buttons row is at popup_area.y + 1 (border) + 4 (rows 0-3 with padding)
+    let button_row = popup_area.y + 5;
+    if row != button_row {
+        return None;
+    }
+
+    // inner x starts at popup_area.x + 1 (border) + 2 (padding)
+    let inner_x = popup_area.x + 3;
+    let ok_start = inner_x;
+    let ok_end = ok_start + 6; // "[ OK ]"
+    let revert_start = ok_end + 3; // "   "
+    let revert_end = revert_start + 10; // "[ Revert ]"
+
+    if column >= ok_start && column < ok_end {
+        Some(ModeConfirmChoice::Ok)
+    } else if column >= revert_start && column < revert_end {
+        Some(ModeConfirmChoice::Revert)
+    } else {
+        None
     }
 }

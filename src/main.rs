@@ -79,77 +79,69 @@ fn run_app(
                     break;
                 }
                 KeyCode::Enter => {
-                    if app.ui.active_section == Some(ActiveSection::Displays) {
+                    if app.pending_mode_revert.is_some() {
+                        app.mode_confirm_commit();
+                    } else if app.ui.active_section == Some(ActiveSection::Info) {
                         app.confirm_mode();
+                    } else if app.ui.active_section == Some(ActiveSection::Display) {
+                        app.apply_selected_mode();
+                        app.close_section();
                     } else if app.ui.active_section == Some(ActiveSection::Profiles) {
                         app.apply_profile(app.profiles_cursor);
                     }
+                } // Gamma section controls
+                KeyCode::Char('g') if app.ui.active_section == Some(ActiveSection::Gamma) => {
+                    app.decrease_gamma();
                 }
-                // Gamma section controls
-                KeyCode::Char('g') => {
-                    if app.ui.active_section == Some(ActiveSection::Gamma) {
-                        app.decrease_gamma();
-                    }
+                KeyCode::Char('G') if app.ui.active_section == Some(ActiveSection::Gamma) => {
+                    app.increase_gamma();
                 }
-                KeyCode::Char('G') => {
-                    if app.ui.active_section == Some(ActiveSection::Gamma) {
-                        app.increase_gamma();
-                    }
+                // Special case: 'r' has two different conditions
+                KeyCode::Char('r') if app.ui.active_section == Some(ActiveSection::Info) => {
+                    app.retry_ddc();
                 }
-                KeyCode::Char('r') => {
-                    if app.ui.active_section == Some(ActiveSection::Displays) {
-                        app.retry_ddc();
-                    } else if app.ui.active_section == Some(ActiveSection::Gamma) {
-                        app.reset_gamma();
-                    }
+                KeyCode::Char('r') if app.ui.active_section == Some(ActiveSection::Gamma) => {
+                    app.reset_gamma();
                 }
-                // Night section toggle
-                KeyCode::Char('n') => {
-                    if app.ui.active_section == Some(ActiveSection::Night) {
-                        app.toggle_night_light();
-                    }
+                KeyCode::Char('s') if app.ui.active_section == Some(ActiveSection::Info) => {
+                    app.force_software();
                 }
-                // Temperature: reuse Left/Right when Night or Gamma is open
-                // (already handled by increase/decrease but needs section guard)
-                KeyCode::Char('s') => {
-                    if app.ui.active_section == Some(ActiveSection::Displays) {
-                        app.force_software();
-                    }
+                KeyCode::Char('n') if app.ui.active_section == Some(ActiveSection::Night) => {
+                    app.toggle_night_light();
                 }
-                KeyCode::Char('w') => {
-                    if app.ui.active_section == Some(ActiveSection::Profiles) {
-                        let name = if app.config.profiles.is_empty() {
-                            "custom".to_string()
-                        } else {
-                            let presets = ["indoor", "outdoor", "gaming", "night", "custom"];
-                            let existing: Vec<&str> = app
-                                .config
-                                .profiles
-                                .iter()
-                                .map(|p| p.name.as_str())
-                                .collect();
-                            presets
-                                .iter()
-                                .find(|&&n| !existing.contains(&n))
-                                .map(|&n| n.to_string())
-                                .unwrap_or_else(|| format!("custom-{}", app.config.profiles.len()))
-                        };
-                        app.save_profile(name);
-                    }
+                KeyCode::Char('w') if app.ui.active_section == Some(ActiveSection::Profiles) => {
+                    let name = if app.config.profiles.is_empty() {
+                        "custom".to_string()
+                    } else {
+                        let presets = ["indoor", "outdoor", "gaming", "night", "custom"];
+                        let existing: Vec<&str> = app
+                            .config
+                            .profiles
+                            .iter()
+                            .map(|p| p.name.as_str())
+                            .collect();
+                        presets
+                            .iter()
+                            .find(|&&n| !existing.contains(&n))
+                            .map(|&n| n.to_string())
+                            .unwrap_or_else(|| format!("custom-{}", app.config.profiles.len()))
+                    };
+                    app.save_profile(name);
                 }
-                KeyCode::Char('d') => {
-                    if app.ui.active_section == Some(ActiveSection::Profiles) {
-                        app.delete_profile(app.profiles_cursor);
-                    }
+                KeyCode::Char('d') if app.ui.active_section == Some(ActiveSection::Profiles) => {
+                    app.delete_profile(app.profiles_cursor);
                 }
                 KeyCode::Esc => app.close_section(),
-                KeyCode::Char('1') => app.toggle_section(ActiveSection::Displays),
-                KeyCode::Char('2') => app.toggle_section(ActiveSection::Profiles),
-                KeyCode::Char('3') => app.toggle_section(ActiveSection::Gamma),
-                KeyCode::Char('4') => app.toggle_section(ActiveSection::Night),
+                KeyCode::Char('1') => app.toggle_section(ActiveSection::Info),
+                KeyCode::Char('2') => app.toggle_section(ActiveSection::Display),
+                KeyCode::Char('3') => app.toggle_section(ActiveSection::Profiles),
+                KeyCode::Char('4') => app.toggle_section(ActiveSection::Gamma),
+                KeyCode::Char('5') => app.toggle_section(ActiveSection::Night),
                 KeyCode::Up => {
                     if app.ui.active_section == Some(ActiveSection::Profiles) {
                         app.profiles_previous();
+                    } else if app.ui.active_section == Some(ActiveSection::Display) {
+                        app.display_previous();
                     } else {
                         app.previous();
                     }
@@ -157,21 +149,16 @@ fn run_app(
                 KeyCode::Down => {
                     if app.ui.active_section == Some(ActiveSection::Profiles) {
                         app.profiles_next();
+                    } else if app.ui.active_section == Some(ActiveSection::Display) {
+                        app.display_next();
                     } else {
                         app.next();
                     }
                 }
-                KeyCode::Right => {
-                    if app.ui.active_section == Some(ActiveSection::Night)
-                        || app.ui.active_section == Some(ActiveSection::Gamma)
-                    {
-                        app.increase_temperature();
-                    } else {
-                        app.increase();
-                    }
-                }
                 KeyCode::Left => {
-                    if app.ui.active_section == Some(ActiveSection::Night)
+                    if app.pending_mode_revert.is_some() {
+                        app.mode_confirm_select_revert();
+                    } else if app.ui.active_section == Some(ActiveSection::Night)
                         || app.ui.active_section == Some(ActiveSection::Gamma)
                     {
                         app.decrease_temperature();
@@ -179,14 +166,15 @@ fn run_app(
                         app.decrease();
                     }
                 }
-                KeyCode::Tab => {
-                    if app.ui.active_section == Some(ActiveSection::Displays) {
-                        app.cycle_refresh_rate(false);
-                    }
-                }
-                KeyCode::BackTab => {
-                    if app.ui.active_section == Some(ActiveSection::Displays) {
-                        app.cycle_refresh_rate(true);
+                KeyCode::Right => {
+                    if app.pending_mode_revert.is_some() {
+                        app.mode_confirm_select_ok();
+                    } else if app.ui.active_section == Some(ActiveSection::Night)
+                        || app.ui.active_section == Some(ActiveSection::Gamma)
+                    {
+                        app.increase_temperature();
+                    } else {
+                        app.increase();
                     }
                 }
                 _ => {}
@@ -196,26 +184,49 @@ fn run_app(
 
                 match mouse.kind {
                     MouseEventKind::Down(MouseButton::Left) => {
-                        if let Some(section) = ui::section_at(area, mouse.column, mouse.row) {
-                            app.toggle_section(section);
-                        } else if let Some(brightness) =
-                            ui::brightness_at(area, &app, mouse.column, mouse.row)
+                        if app.pending_mode_revert.is_some() {
+                            if let Some(choice) =
+                                ui::mode_confirm_button_at(area, mouse.column, mouse.row)
+                            {
+                                match choice {
+                                    app::ModeConfirmChoice::Ok => app.mode_confirm_select_ok(),
+                                    app::ModeConfirmChoice::Revert => {
+                                        app.mode_confirm_select_revert()
+                                    }
+                                }
+                                app.mode_confirm_commit();
+                            }
+                        } else if let Some(section) = ui::section_at(area, mouse.column, mouse.row)
                         {
-                            app.set_brightness(brightness);
+                            app.toggle_section(section);
                         } else if let Some(index) =
                             ui::device_at(area, &app, mouse.column, mouse.row)
                         {
+                            // Select the device first
                             app.select(index);
                             app.close_section();
+                            // If click landed on that device's brightness bar, set brightness too
+                            if let Some(brightness) =
+                                ui::brightness_at(area, &app, mouse.column, mouse.row)
+                            {
+                                app.set_brightness(brightness);
+                            }
                         } else {
                             app.close_section();
                         }
                     }
                     MouseEventKind::Drag(MouseButton::Left) => {
+                        // Only adjust brightness if drag is on the selected device's bar
                         if let Some(brightness) =
                             ui::brightness_at(area, &app, mouse.column, mouse.row)
                         {
-                            app.set_brightness(brightness);
+                            // Make sure the drag is on the currently selected device's row
+                            if let Some(index) = ui::device_at(area, &app, mouse.column, mouse.row)
+                            {
+                                if index == app.selected {
+                                    app.set_brightness(brightness);
+                                }
+                            }
                         }
                     }
                     MouseEventKind::ScrollUp => {

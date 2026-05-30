@@ -18,6 +18,14 @@ use self::theme::{CharSet, Theme};
 pub use devices::{brightness_at, device_at};
 pub use footer::section_at;
 
+pub fn mode_confirm_button_at(
+    area: Rect,
+    column: u16,
+    row: u16,
+) -> Option<crate::app::ModeConfirmChoice> {
+    overlays::mode_confirm_button_at(area, column, row)
+}
+
 pub fn render(frame: &mut Frame, app: &App) {
     let theme = Theme::default();
     let char_set = CharSet::default();
@@ -39,6 +47,9 @@ pub fn render(frame: &mut Frame, app: &App) {
         overlays::render_section_window(frame.area(), frame, app, section, &theme);
     }
 
+    if app.pending_mode_revert.is_some() {
+        overlays::render_mode_confirm_popup(frame.area(), frame, app, &theme);
+    }
     // Collect up to 3 messages from the front of the queue, newest first
     let stack: Vec<&str> = app
         .ui

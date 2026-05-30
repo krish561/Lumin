@@ -12,7 +12,7 @@ pub(crate) fn render(area: Rect, frame: &mut Frame, app: &App, theme: &Theme, ch
     let layout = footer_layout(area);
     render_display_sections(layout.sections, frame, app, theme, char_set);
 
-    let line = Line::from("↑/↓ select   ←/→ adjust   q quit")
+    let line = Line::from("1-5 sections   ↑/↓ select   ←/→ adjust   q quit")
         .style(theme.help)
         .alignment(Alignment::Right);
     frame.render_widget(line, layout.help);
@@ -40,11 +40,10 @@ fn render_display_sections(
     theme: &Theme,
     char_set: &CharSet,
 ) {
-    let active = app.ui.active_section.unwrap_or(ActiveSection::Displays);
     let areas = section_areas(area);
 
     for (section, area) in ActiveSection::ALL.iter().zip(areas.iter()) {
-        let selected = section == &active;
+        let selected = app.ui.active_section == Some(*section);
         let line = if selected {
             Line::from(vec![
                 Span::styled(char_set.tab_marker_left, theme.tab_marker),
@@ -65,9 +64,10 @@ struct FooterLayout {
 }
 
 fn footer_layout(area: Rect) -> FooterLayout {
+    // Widen help area to fit the longer hint text
     let layout = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(0), Constraint::Length(34)])
+        .constraints([Constraint::Min(0), Constraint::Length(52)])
         .split(area);
 
     FooterLayout {

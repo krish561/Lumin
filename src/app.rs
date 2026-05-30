@@ -15,18 +15,26 @@ pub enum BrightnessBackend {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveSection {
-    Displays,
+    Info,
+    Display,
     Profiles,
     Gamma,
     Night,
 }
 
 impl ActiveSection {
-    pub const ALL: [Self; 4] = [Self::Displays, Self::Profiles, Self::Gamma, Self::Night];
+    pub const ALL: [Self; 5] = [
+        Self::Info,
+        Self::Display,
+        Self::Profiles,
+        Self::Gamma,
+        Self::Night,
+    ];
 
     pub fn title(self) -> &'static str {
         match self {
-            Self::Displays => "Displays",
+            Self::Info => "Info",
+            Self::Display => "Display",
             Self::Profiles => "Profiles",
             Self::Gamma => "Gamma",
             Self::Night => "Night",
@@ -108,11 +116,25 @@ pub struct App {
     pub devices: Vec<Device>,
     pub selected: usize,
     pub profiles_cursor: usize,
+    pub display_cursor: usize,
     pub ui: UiState,
     pub config: Config,
     pub temperature: u32,
     pub gamma: u32,
-    pub pending_mode_revert: Option<(String, Instant)>,
+    pub pending_mode_revert: Option<PendingModeRevert>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModeConfirmChoice {
+    Ok,
+    Revert,
+}
+
+#[derive(Debug, Clone)]
+pub struct PendingModeRevert {
+    pub previous_mode: String,
+    pub revert_at: Instant,
+    pub choice: ModeConfirmChoice, // default Revert
 }
 
 impl App {
@@ -223,6 +245,7 @@ impl App {
             gamma: 100,
             pending_mode_revert: None,
             profiles_cursor: 0,
+            display_cursor: 0,
         };
 
         // Apply restored brightness to hardware
@@ -241,12 +264,6 @@ impl App {
             if matches!(device.backend, BrightnessBackend::Software) {
                 let _ = software::kill_overlay(&device.name);
             }
-        }
-    }
-
-    pub fn select(&mut self, index: usize) {
-        if index < self.devices.len() {
-            self.selected = index;
         }
     }
 
@@ -289,12 +306,8 @@ impl App {
         let Some(device) = self.devices.get_mut(self.selected) else {
             return;
         };
-
-        device.brightness = device.brightness.saturating_add(5).min(100);
-
-        // Update config
+        device.brightness = device.brightness.saturating_add(1).min(100);
         self.config.set_brightness(&device.name, device.brightness);
-
         if let Some(message) = Self::apply_brightness(device) {
             self.notify(message);
         }
@@ -304,12 +317,8 @@ impl App {
         let Some(device) = self.devices.get_mut(self.selected) else {
             return;
         };
-
-        device.brightness = device.brightness.saturating_sub(5);
-
-        // Update config
+        device.brightness = device.brightness.saturating_sub(1);
         self.config.set_brightness(&device.name, device.brightness);
-
         if let Some(message) = Self::apply_brightness(device) {
             self.notify(message);
         }
@@ -332,7 +341,6 @@ impl App {
             return;
         };
 
-        // Save current mode before changing
         let previous_mode = format!(
             "{}x{}@{:.2}Hz",
             device.width, device.height, device.refresh_rate
@@ -342,7 +350,6 @@ impl App {
 
         match monitor::set_monitor_mode(&name, &mode_str, scale) {
             Ok(_) => {
-                // Update device state
                 if let Some(rate) = parse_refresh_rate(&mode_str) {
                     self.devices[self.selected].refresh_rate = rate;
                 }
@@ -350,12 +357,13 @@ impl App {
                     self.devices[self.selected].width = w;
                     self.devices[self.selected].height = h;
                 }
-                // Set revert timer — 10 seconds to confirm
-                self.pending_mode_revert =
-                    Some((previous_mode, Instant::now() + Duration::from_secs(10)));
-                self.notify(
-                    "Mode changed. Press Enter to confirm or wait 10s to revert.".to_string(),
-                );
+                // Close Display panel, show confirmation popup
+                self.ui.active_section = None;
+                self.pending_mode_revert = Some(PendingModeRevert {
+                    previous_mode,
+                    revert_at: Instant::now() + Duration::from_secs(10),
+                    choice: ModeConfirmChoice::Revert,
+                });
             }
             Err(_) => self.notify(format!("Failed to set mode {mode_str}")),
         }
@@ -363,14 +371,13 @@ impl App {
 
     pub fn confirm_mode(&mut self) {
         self.pending_mode_revert = None;
-        self.notify("Mode confirmed.".to_string());
     }
 
     pub fn check_mode_revert(&mut self) {
-        let Some((ref mode, revert_at)) = self.pending_mode_revert.clone() else {
+        let Some(ref pending) = self.pending_mode_revert.clone() else {
             return;
         };
-        if Instant::now() >= revert_at {
+        if Instant::now() >= pending.revert_at {
             let name = self
                 .devices
                 .get(self.selected)
@@ -381,16 +388,59 @@ impl App {
                 .get(self.selected)
                 .map(|d| d.scale)
                 .unwrap_or(1.0);
-            let _ = monitor::set_monitor_mode(&name, &mode, scale);
-            if let Some(rate) = parse_refresh_rate(&mode) {
+            let _ = monitor::set_monitor_mode(&name, &pending.previous_mode, scale);
+            if let Some(rate) = parse_refresh_rate(&pending.previous_mode) {
                 self.devices[self.selected].refresh_rate = rate;
             }
-            if let Some((w, h)) = parse_resolution(&mode) {
+            if let Some((w, h)) = parse_resolution(&pending.previous_mode) {
                 self.devices[self.selected].width = w;
                 self.devices[self.selected].height = h;
             }
             self.pending_mode_revert = None;
             self.notify("Mode reverted.".to_string());
+        }
+    }
+
+    pub fn mode_confirm_select_ok(&mut self) {
+        if let Some(ref mut p) = self.pending_mode_revert {
+            p.choice = ModeConfirmChoice::Ok;
+        }
+    }
+
+    pub fn mode_confirm_select_revert(&mut self) {
+        if let Some(ref mut p) = self.pending_mode_revert {
+            p.choice = ModeConfirmChoice::Revert;
+        }
+    }
+
+    pub fn mode_confirm_commit(&mut self) {
+        let Some(ref pending) = self.pending_mode_revert.clone() else {
+            return;
+        };
+        match pending.choice {
+            ModeConfirmChoice::Ok => self.confirm_mode(),
+            ModeConfirmChoice::Revert => {
+                let name = self
+                    .devices
+                    .get(self.selected)
+                    .map(|d| d.name.clone())
+                    .unwrap_or_default();
+                let scale = self
+                    .devices
+                    .get(self.selected)
+                    .map(|d| d.scale)
+                    .unwrap_or(1.0);
+                let _ = monitor::set_monitor_mode(&name, &pending.previous_mode, scale);
+                if let Some(rate) = parse_refresh_rate(&pending.previous_mode) {
+                    self.devices[self.selected].refresh_rate = rate;
+                }
+                if let Some((w, h)) = parse_resolution(&pending.previous_mode) {
+                    self.devices[self.selected].width = w;
+                    self.devices[self.selected].height = h;
+                }
+                self.pending_mode_revert = None;
+                self.notify("Mode reverted.".to_string());
+            }
         }
     }
 
@@ -577,25 +627,6 @@ impl App {
 
         self.notify(format!("Forced Software backend for {}.", name));
     }
-    pub fn cycle_refresh_rate(&mut self, reverse: bool) {
-        let Some(device) = self.devices.get(self.selected) else {
-            return;
-        };
-        let modes = device.available_modes.clone();
-        let current = format!(
-            "{}x{}@{:.2}Hz",
-            device.width, device.height, device.refresh_rate
-        );
-        let pos = modes.iter().position(|m| m == &current).unwrap_or(0);
-        let next = if reverse {
-            if pos == 0 { modes.len() - 1 } else { pos - 1 }
-        } else {
-            (pos + 1) % modes.len()
-        };
-        if let Some(mode) = modes.get(next).cloned() {
-            self.set_refresh_rate(mode);
-        }
-    }
 
     pub fn save_profile(&mut self, name: String) {
         let entries = self
@@ -675,6 +706,53 @@ impl App {
 
     pub fn profiles_previous(&mut self) {
         self.profiles_cursor = self.profiles_cursor.saturating_sub(1);
+    }
+
+    pub fn display_next(&mut self) {
+        let len = self
+            .devices
+            .get(self.selected)
+            .map(|d| d.available_modes.len())
+            .unwrap_or(0);
+        if len == 0 {
+            return;
+        }
+        self.display_cursor = (self.display_cursor + 1).min(len - 1);
+    }
+
+    pub fn display_previous(&mut self) {
+        self.display_cursor = self.display_cursor.saturating_sub(1);
+    }
+
+    pub fn apply_selected_mode(&mut self) {
+        let Some(device) = self.devices.get(self.selected) else {
+            return;
+        };
+        let Some(mode) = device.available_modes.get(self.display_cursor).cloned() else {
+            return;
+        };
+        self.set_refresh_rate(mode);
+    }
+    pub fn select(&mut self, index: usize) {
+        if index < self.devices.len() {
+            self.selected = index;
+            self.reset_display_cursor();
+        }
+    }
+
+    pub fn reset_display_cursor(&mut self) {
+        let Some(device) = self.devices.get(self.selected) else {
+            return;
+        };
+        let current = format!(
+            "{}x{}@{:.2}Hz",
+            device.width, device.height, device.refresh_rate
+        );
+        self.display_cursor = device
+            .available_modes
+            .iter()
+            .position(|m| m == &current)
+            .unwrap_or(0);
     }
 }
 fn parse_refresh_rate(mode_str: &str) -> Option<f32> {
