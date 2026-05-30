@@ -2,7 +2,7 @@
 
 A TUI brightness and display controller for Hyprland.
 
-Controls laptop brightness, external monitors via DDC/CI, and falls back to a software dimming overlay when hardware brightness is unavailable. Includes gamma, night light, refresh rate controls, and named brightness profiles. Settings persist across sessions.
+Controls laptop brightness, external monitors via DDC/CI, and falls back to a software dimming overlay when hardware brightness is unavailable. Includes gamma, night light, resolution and refresh rate controls, and named brightness profiles. Settings persist across sessions.
 
 The UI is inspired by [wiremix](https://github.com/tsowell/wiremix): dense rows, text sliders, mouse support, and a footer menu.
 
@@ -15,11 +15,12 @@ The UI is inspired by [wiremix](https://github.com/tsowell/wiremix): dense rows,
 - software overlay dimming fallback when DDC is unavailable
 - automatic backend selection per monitor
 - brightness persistence across sessions (`~/.config/lumin/lumin.toml`)
-- keyboard and mouse brightness controls
+- keyboard (1% steps) and mouse brightness controls
 - Hyprland floating window launch
 - backend reason shown inline in each device row
 - stacked notification queue (up to 3 visible, newest on top, auto-expiring)
-- **Displays section:** backend info, mode cycling with 10s revert timer, backend switching
+- **Info section:** backend info, brightness bar, retry DDC / force software actions
+- **Display section:** flat mode list, resolution + refresh rate selection, 10s confirmation popup with OK/Revert
 - **Gamma section:** color temperature (2500K–6500K) and gamma (10–200%) via `hyprsunset`
 - **Night section:** night light toggle and manual temperature control
 - **Profiles section:** named brightness presets, save/apply/delete, persisted to config
@@ -28,18 +29,18 @@ The UI is inspired by [wiremix](https://github.com/tsowell/wiremix): dense rows,
 
 - `q`: quit
 - `Esc`: close popup
-- `Up` / `Down`: select display (or move profiles cursor when Profiles open)
-- `Left` / `Right`: adjust brightness (or temperature when Gamma/Night open)
-- `1` / `2` / `3` / `4`: open footer sections
-- `Tab` / `Shift+Tab`: cycle refresh rate (Displays section)
-- `Enter`: confirm mode change (Displays) / apply selected profile (Profiles)
-- `r`: retry DDC (Displays) / reset gamma (Gamma)
-- `s`: force software backend (Displays)
+- `Up` / `Down`: select display / navigate list in Display or Profiles
+- `Left` / `Right`: adjust brightness / temperature (Gamma, Night) / choose OK or Revert (mode popup)
+- `1` / `2` / `3` / `4` / `5`: open Info / Display / Profiles / Gamma / Night
+- `Enter`: apply mode (Display) / confirm popup choice / apply profile (Profiles)
+- `r`: retry DDC (Info) / reset gamma (Gamma)
+- `s`: force software backend (Info)
 - `g` / `G`: decrease/increase gamma (Gamma section)
 - `n`: toggle night light (Night section)
 - `w`: save current brightness state as profile (Profiles section)
 - `d`: delete selected profile (Profiles section)
 - mouse click/drag on a slider: set brightness
+- mouse click on OK / Revert: choose and commit mode change
 
 ## Requirements
 
@@ -58,7 +59,7 @@ cargo run
 
 On Hyprland, this opens lumin in a pinned floating terminal window.
 
-The overlay helper is built as a second binary:
+Build both binaries:
 
 ```bash
 cargo build --bins
@@ -100,7 +101,7 @@ For each monitor, Lumin picks a backend automatically:
 | `HDMI*` / `DP*` with working DDC | DDC (`ddcutil`) |
 | Everything else | Software overlay |
 
-If DDC fails during use, the monitor falls back to the software overlay immediately. Use the Displays section to retry DDC or force a backend.
+If DDC fails during use, the monitor falls back to the software overlay immediately. Use the Info section to retry DDC or force a backend.
 
 ## Notes
 
